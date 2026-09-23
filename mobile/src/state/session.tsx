@@ -48,6 +48,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
+/** Staff (owner / manager / worker) see the management panel. */
+export const isStaff = (session: Session | null) => !!session?.adminRole;
+
 export function useSession() {
   const ctx = useContext(SessionContext);
   if (!ctx) throw new Error('useSession must be used inside SessionProvider');

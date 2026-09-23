@@ -5,6 +5,7 @@ import { colors } from '../../theme';
 export default function AdminLayout() {
   const { session } = useSession();
   if (!session) return <Redirect href="/welcome" />;
-  if (session.role !== 'admin') return <Redirect href="/" />;
+  // panel accounts, and customers who were given a staff role (owner / manager / worker)
+  if (!session.adminRole) return <Redirect href="/" />;
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.mist } }} />;
 }

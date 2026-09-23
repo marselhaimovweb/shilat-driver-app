@@ -299,5 +299,5 @@ const styles = StyleSheet.create({
   tile: { flex: 1, borderRadius: radius.lg, overflow: 'hidden', minWidth: 140 },
   loyalty: { borderRadius: radius.xl, overflow: 'hidden', padding: space.lg, gap: space.md },
   drops: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 10, justifyContent: 'space-between' },
-  drop: { width: '17%', aspectRatio: 1, maxWidth: 48, borderRadius: 999, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  drop: { width: '18%', aspectRatio: 1, maxWidth: 48, borderRadius: 999, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 });

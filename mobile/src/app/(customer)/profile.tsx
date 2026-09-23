@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { api } from '../../api';
 import { AddVehicleSheet } from '../../components/AddVehicleSheet';
-import { Button, IconButton } from '../../components/Button';
+import { Button, IconButton, type IconName } from '../../components/Button';
 import { Field, Toggle } from '../../components/Controls';
 import { Plate, vehicleIcon } from '../../components/Domain';
 import { Card, Divider, Hero, IconBadge, Row, Screen, SectionTitle } from '../../components/Layout';
@@ -14,7 +14,8 @@ import { formatPhone } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import { useConfig } from '../../state/config';
 import { useFeedback } from '../../state/feedback';
-import { useSession } from '../../state/session';
+import { isStaff, useSession } from '../../state/session';
+import { openLegal } from '../../components/Legal';
 import { colors, gradients, radius, space } from '../../theme';
 
 export default function Profile() {
@@ -62,6 +63,23 @@ export default function Profile() {
     vehicles.reload();
   }
 
+  async function deleteAccount() {
+    const ok = await confirm({
+      title: 'למחוק את החשבון?',
+      message: 'הפרטים האישיים, הרכבים וההיסטוריה יימחקו. רשומות כספיות נשמרות ללא פרטים מזהים כנדרש בחוק. לא ניתן לבטל את הפעולה.',
+      confirmText: 'מחיקת החשבון לצמיתות',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await api.deleteAccount();
+      await signOut();
+      router.replace('/welcome');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
   async function logout() {
     if (!(await confirm({ title: 'להתנתק מהחשבון?', confirmText: 'התנתקות' }))) return;
     await signOut();
@@ -95,6 +113,21 @@ export default function Profile() {
         </Hero>
       }
     >
+      {isStaff(session) && (
+        <Card onPress={() => router.push('/admin')} style={{ gap: 6, borderWidth: 1.5, borderColor: colors.cobalt }}>
+          <Row>
+            <IconBadge icon="shield-crown-outline" color="#fff" background={colors.navy} />
+            <View style={{ flex: 1 }}>
+              <Text variant="h3">לוח ניהול העסק</Text>
+              <Text variant="small" color={colors.textSoft}>
+                {session?.adminRole === 'OWNER' ? 'בעלים' : session?.adminRole === 'MANAGER' ? 'מנהל/ת' : 'צוות'} · תורים, חנות, מחירים והגדרות
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-left" size={24} color={colors.cobalt} />
+          </Row>
+        </Card>
+      )}
+
       <SectionTitle title="הרכבים שלי" action="הוספה" onAction={() => setAdding(true)} />
       <Card padded={false}>
         {(vehicles.data ?? []).map((v, i) => (
@@ -149,7 +182,29 @@ export default function Profile() {
         <MenuItem icon="map-marker-outline" label={config?.business.address ?? ''} onPress={() => Linking.openURL(`https://waze.com/ul?q=${encodeURIComponent(config?.business.address ?? '')}`)} />
       </Card>
 
+      <SectionTitle title="החשבון שלי" />
+      <Card padded={false}>
+        <MenuItem icon="receipt" label="ההזמנות שלי מהחנות" onPress={() => router.push('/orders')} />
+        <Divider />
+        <MenuItem icon="human" label="הגדרות נגישות" onPress={() => router.push('/accessibility')} />
+        <Divider />
+        <MenuItem icon="file-document-outline" label="תקנון ותנאי שימוש" onPress={() => openLegal('TERMS')} />
+        <Divider />
+        <MenuItem icon="shield-lock-outline" label="מדיניות פרטיות" onPress={() => openLegal('PRIVACY')} />
+        <Divider />
+        <MenuItem icon="cash-refund" label="ביטולים, החזרות ומשלוחים" onPress={() => openLegal('CANCELLATION')} />
+        <Divider />
+        <MenuItem icon="wheelchair-accessibility" label="הצהרת נגישות" onPress={() => openLegal('ACCESSIBILITY')} />
+      </Card>
+
       <Button title="התנתקות" variant="ghost" icon="logout" onPress={logout} />
+      <Button title="מחיקת החשבון" variant="ghost" icon="account-remove-outline" size="sm" onPress={deleteAccount} />
+      {!!config?.business.legalName && (
+        <Text variant="caption" color={colors.textMuted} align="center">
+          {config.business.legalName}
+          {config.business.taxId ? ` · ע.מ./ח.פ. ${config.business.taxId}` : ''}
+        </Text>
+      )}
       <Text variant="caption" color={colors.textMuted} align="center">
         {api.mode === 'demo' ? 'מצב הדגמה · ' : ''}גרסה 1.0.0
       </Text>
@@ -180,9 +235,9 @@ function HeroStat({ value, label }: { value: string; label: string }) {
   );
 }
 
-function MenuItem({ icon, label, onPress }: { icon: 'phone-outline' | 'whatsapp' | 'map-marker-outline'; label: string; onPress: () => void }) {
+function MenuItem({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: space.md }, pressed && { backgroundColor: colors.mist }]}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: space.md }, pressed && { backgroundColor: colors.mist }]}>
       <MaterialCommunityIcons name={icon} size={22} color={colors.cobalt} />
       <Text style={{ flex: 1 }}>{label}</Text>
       <MaterialCommunityIcons name="chevron-left" size={22} color={colors.textMuted} />

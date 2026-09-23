@@ -3,7 +3,8 @@ import { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { api } from '../api';
 import { Button } from '../components/Button';
-import { Field } from '../components/Controls';
+import { Checkbox, Field } from '../components/Controls';
+import { LegalLink } from '../components/Legal';
 import { Card, Hero, Screen } from '../components/Layout';
 import { Text } from '../components/Text';
 import { formatPhone } from '../lib/format';
@@ -24,6 +25,9 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [pendingRole, setPendingRole] = useState<string | undefined>();
+  const [agreed, setAgreed] = useState(false);
+  const [marketing, setMarketing] = useState(false);
   const codeInput = useRef<TextInput>(null);
 
   const digits = phone.replace(/\D/g, '');
@@ -50,12 +54,15 @@ export default function Login() {
     setBusy(true);
     try {
       const res = await api.verifyOtp(digits, value);
+      const adminRole = res.customer.role && res.customer.role !== 'CUSTOMER' ? res.customer.role : undefined;
       if (!res.customer.fullName) {
         setPendingToken(res.token);
+        setPendingRole(adminRole);
         setStep('name');
       } else {
-        await signIn({ token: res.token, role: 'customer', name: res.customer.fullName });
-        router.replace('/');
+        await signIn({ token: res.token, role: 'customer', name: res.customer.fullName, adminRole });
+        const pending = await api.getPendingConsents().catch(() => []);
+        router.replace(pending.length ? '/consent' : '/');
       }
     } catch (e) {
       setError((e as Error).message);
@@ -67,10 +74,12 @@ export default function Login() {
 
   async function saveName() {
     if (name.trim().length < 2) return setError('איך נקרא לך? לפחות 2 אותיות');
+    if (!agreed) return setError('יש לאשר את התקנון ומדיניות הפרטיות');
     setBusy(true);
     try {
-      await signIn({ token: pendingToken!, role: 'customer', name: name.trim() });
-      await api.updateMe({ fullName: name.trim() });
+      await signIn({ token: pendingToken!, role: 'customer', name: name.trim(), adminRole: pendingRole as never });
+      await api.updateMe({ fullName: name.trim(), marketingOptIn: marketing });
+      await api.acceptConsents(['TERMS', 'PRIVACY']);
       toast(`ברוכים הבאים, ${name.trim()}!`);
       router.replace('/');
     } catch (e) {
@@ -105,6 +114,16 @@ export default function Login() {
                 onSubmitEditing={sendCode}
               />
               <Button title="שלחו לי קוד" icon="message-text-outline" onPress={sendCode} loading={busy} />
+              <Text variant="small" color={colors.textMuted}>
+                המספר משמש לזיהוי ולשליחת הודעות על התורים וההזמנות. פרטים ב<LegalLink docKey="PRIVACY">מדיניות הפרטיות</LegalLink>.
+              </Text>
+              {api.mode === 'demo' && (
+                <View style={styles.devCode}>
+                  <Text variant="small" color={colors.ocean} align="center">
+                    מצב הדגמה: 052-1234567 = בעלת העסק (רואה את תפריט הניהול). כל מספר אחר = לקוח רגיל.
+                  </Text>
+                </View>
+              )}
             </>
           )}
 
@@ -160,12 +179,20 @@ export default function Login() {
           {step === 'name' && (
             <>
               <Field label="שם מלא" icon="account-outline" placeholder="ישראל ישראלי" value={name} onChangeText={setName} autoFocus error={error} />
+              <Checkbox checked={agreed} onChange={setAgreed}>
+                <Text>
+                  קראתי ואני מסכים/ה ל<LegalLink docKey="TERMS">תקנון</LegalLink> ול<LegalLink docKey="PRIVACY">מדיניות הפרטיות</LegalLink>
+                </Text>
+              </Checkbox>
+              <Checkbox checked={marketing} onChange={setMarketing}>
+                <Text color={colors.textSoft}>לא חובה: אשמח לקבל עדכונים ומבצעים (אפשר להסיר בכל עת)</Text>
+              </Checkbox>
               <Button title="בואו נתחיל" icon="arrow-left" iconPosition="end" onPress={saveName} loading={busy} />
             </>
           )}
         </Card>
         <Text variant="small" color={colors.textMuted} align="center">
-          בכניסה אתם מאשרים את תנאי השימוש ומדיניות הפרטיות
+          <LegalLink docKey="TERMS">תקנון</LegalLink> · <LegalLink docKey="PRIVACY">פרטיות</LegalLink> · <LegalLink docKey="ACCESSIBILITY">הצהרת נגישות</LegalLink>
         </Text>
       </Screen>
     </KeyboardAvoidingView>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { api, type Availability } from '../../../api';
 import { Button } from '../../../components/Button';
-import { Chip, ChipRow, Field, Segmented } from '../../../components/Controls';
+import { Chip, ChipRow, Field, Segmented, Toggle } from '../../../components/Controls';
 import { vehicleIcon } from '../../../components/Domain';
 import { Card, Hero, Row, Screen, SectionTitle } from '../../../components/Layout';
 import { Text } from '../../../components/Text';
@@ -31,18 +31,20 @@ export default function AdminNewBooking() {
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [addonCodes, setAddonCodes] = useState<string[]>([]);
+  const [needsAccessibility, setNeedsAccessibility] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setTime(null);
     try {
-      setAvailability(await api.adminAvailability(date, service));
+      setAvailability(await api.adminAvailability(date, service, addonCodes));
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
       setLoading(false);
     }
-  }, [date, service, toast]);
+  }, [date, service, toast, addonCodes]);
 
   useEffect(() => {
     load();
@@ -55,7 +57,9 @@ export default function AdminNewBooking() {
     }
   }, [availability, source, date]);
 
-  const price = priceOf(vehicleType, service);
+  const addonsTotal = (config?.addons ?? []).filter((a) => addonCodes.includes(a.code)).reduce((s, a) => s + a.price, 0);
+  const base = priceOf(vehicleType, service);
+  const price = base !== null ? base + addonsTotal : null;
 
   async function submit() {
     if (!/^05\d{8}$/.test(phone.replace(/\D/g, ''))) return toast('מספר טלפון לא תקין', 'error');
@@ -71,7 +75,11 @@ export default function AdminNewBooking() {
         date,
         time,
         source,
+        addonCodes,
+        needsAccessibility,
       });
+      setAddonCodes([]);
+      setNeedsAccessibility(false);
       toast(`תור #${res.appointment.id} נקבע ל-${time}`);
       setPhone('');
       setName('');
@@ -142,6 +150,27 @@ export default function AdminNewBooking() {
           ))}
         </ChipRow>
       </View>
+
+      {!!config?.addons.length && (
+        <View style={{ marginHorizontal: -space.lg }}>
+          <ChipRow>
+            {config.addons.map((a) => (
+              <Chip
+                key={a.code}
+                icon={addonCodes.includes(a.code) ? 'check' : 'plus'}
+                label={`${a.nameHe} +${formatPrice(a.price)}`}
+                selected={addonCodes.includes(a.code)}
+                onPress={() => setAddonCodes((l) => (l.includes(a.code) ? l.filter((c) => c !== a.code) : [...l, a.code]))}
+              />
+            ))}
+          </ChipRow>
+        </View>
+      )}
+      <Row style={{ backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14 }}>
+        <MaterialCommunityIcons name="wheelchair-accessibility" size={22} color={colors.cobalt} />
+        <Text style={{ flex: 1 }}>הלקוח זקוק לסיוע נגישות</Text>
+        <Toggle label="סיוע נגישות" value={needsAccessibility} onChange={setNeedsAccessibility} />
+      </Row>
 
       {source === 'PHONE' && (
         <>

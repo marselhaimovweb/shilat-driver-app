@@ -69,15 +69,15 @@ authRouter.post('/otp/verify', limiter, async (req, res) => {
   }
   await query('UPDATE dbo.OtpCodes SET UsedAt = GETDATE() WHERE OtpId = @id', { id: otp.OtpId });
 
-  let customer = await queryOne<{ id: number; fullName: string | null; isBlocked: boolean }>(
-    'SELECT CustomerId AS id, FullName AS fullName, IsBlocked AS isBlocked FROM dbo.Customers WHERE Phone = @phone',
+  let customer = await queryOne<{ id: number; fullName: string | null; isBlocked: boolean; role?: string }>(
+    'SELECT CustomerId AS id, FullName AS fullName, IsBlocked AS isBlocked, Role AS role FROM dbo.Customers WHERE Phone = @phone',
     { phone },
   );
   const isNew = !customer;
   if (!customer) {
     customer = await queryOne(
       `INSERT INTO dbo.Customers (Phone, FullName) VALUES (@phone, @fullName);
-       SELECT CAST(SCOPE_IDENTITY() AS INT) AS id, @fullName AS fullName, CAST(0 AS BIT) AS isBlocked;`,
+       SELECT CAST(SCOPE_IDENTITY() AS INT) AS id, @fullName AS fullName, CAST(0 AS BIT) AS isBlocked, 'CUSTOMER' AS role;`,
       { phone, fullName: body.fullName ?? null },
     );
   } else if (body.fullName && !customer.fullName) {
@@ -89,7 +89,7 @@ authRouter.post('/otp/verify', limiter, async (req, res) => {
   res.json({
     token: signToken({ sub: customer!.id, role: 'customer' }),
     isNew,
-    customer: { id: customer!.id, phone, fullName: customer!.fullName },
+    customer: { id: customer!.id, phone, fullName: customer!.fullName, role: customer!.role ?? 'CUSTOMER' },
   });
 });
 

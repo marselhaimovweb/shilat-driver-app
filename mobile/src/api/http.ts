@@ -1,4 +1,4 @@
-import { ApiError, type Api, type AppointmentFilters } from './types';
+import { ApiError, type Api, type AppointmentFilters, type LegalDocMeta } from './types';
 
 type TokenGetter = () => string | null;
 
@@ -38,10 +38,16 @@ export function createHttpApi(baseUrl: string, getToken: TokenGetter): Api {
   return {
     mode: 'live',
     getConfig: () => get('/public/config'),
-    getAvailability: (date, service) => get(`/public/availability${qs({ date, service })}`),
+    getAvailability: (date, service, addons) => get(`/public/availability${qs({ date, service, addons: addons?.join(',') })}`),
+    getLegalDoc: (key) => get(`/public/legal/${key}`),
+    getStore: () => get('/public/store'),
+    productImageUrl: (p) => (p.hasImage ? `${baseUrl.replace(/\/$/, '')}/api/public/products/${p.id}/image` : p.imageUrl || null),
 
     requestOtp: (phone) => post('/auth/otp/request', { phone }),
     verifyOtp: (phone, code, fullName) => post('/auth/otp/verify', { phone, code, fullName }),
+    getPendingConsents: async () => (await get<{ pending: LegalDocMeta[] }>('/me/consents')).pending,
+    acceptConsents: async (keys) => (await post<{ pending: LegalDocMeta[] }>('/me/consents', { keys })).pending,
+    deleteAccount: () => del('/me'),
     adminLogin: (username, password) => post('/auth/admin/login', { username, password }),
 
     getMe: () => get('/me'),
@@ -53,9 +59,15 @@ export function createHttpApi(baseUrl: string, getToken: TokenGetter): Api {
     listMyAppointments: (scope, type) => get(`/me/appointments${qs({ scope, type })}`),
     createBooking: (data) => post('/me/appointments', data),
     confirmDemoPayment: (paymentId) => post(`/me/payments/${paymentId}/confirm-demo`),
+    getPaymentStatus: (paymentId) => get(`/me/payments/${paymentId}`),
+    createOrder: (input) => post('/me/orders', input),
+    listMyOrders: () => get('/me/orders'),
+    getMyOrder: (id) => get(`/me/orders/${id}`),
+    cancelMyOrder: (id, reason) => post(`/me/orders/${id}/cancel`, { reason }),
     cancelMyAppointment: (id) => post(`/me/appointments/${id}/cancel`),
     reviewAppointment: (id, rating, comment) => post(`/me/appointments/${id}/review`, { rating, comment }),
 
+    getAdminMe: () => get('/admin/me'),
     getDashboard: (date) => get(`/admin/dashboard${qs({ date })}`),
     listAppointments: (f: AppointmentFilters) =>
       get(
@@ -75,7 +87,32 @@ export function createHttpApi(baseUrl: string, getToken: TokenGetter): Api {
     setAppointmentStatus: (id, data) => patch(`/admin/appointments/${id}/status`, data),
     setAppointmentNotes: (id, adminNotes) => patch(`/admin/appointments/${id}/notes`, { adminNotes }),
     adminCreateBooking: (data) => post('/admin/appointments', data),
-    adminAvailability: (date, service) => get(`/admin/availability${qs({ date, service })}`),
+    adminAvailability: (date, service, addons) => get(`/admin/availability${qs({ date, service, addons: addons?.join(',') })}`),
+    saveAddon: (code, data) => put(`/admin/addons/${code}`, data),
+    getPaymentSettings: () => get('/admin/payment-settings'),
+    savePaymentSettings: (data) => put('/admin/payment-settings', data),
+    listLegalDocs: () => get('/admin/legal'),
+    getLegalDocRaw: (key) => get(`/admin/legal/${key}`),
+    saveLegalDoc: (key, data) => put(`/admin/legal/${key}`, data),
+    getTeam: () => get('/admin/team'),
+    setUserRole: (phone, role, fullName) => put('/admin/team/role', { phone, role, fullName }),
+    createPanelUser: (data) => post('/admin/team/panel-users', data),
+    updatePanelUser: (id, data) => patch(`/admin/team/panel-users/${id}`, data),
+    changeMyPassword: (current, next) => post('/admin/me/password', { current, next }),
+    listAudit: (page) => get(`/admin/audit${qs({ page })}`),
+    adminGetStore: () => get('/admin/store'),
+    createCategory: (data) => post('/admin/store/categories', data),
+    updateCategory: (id, data) => patch(`/admin/store/categories/${id}`, data),
+    createProduct: (data) => post('/admin/store/products', data),
+    updateProduct: (id, data) => patch(`/admin/store/products/${id}`, data),
+    uploadProductImage: (id, base64, contentType) => put(`/admin/store/products/${id}/image`, { base64, contentType }),
+    deleteProductImage: (id) => del(`/admin/store/products/${id}/image`),
+    adjustStock: (id, delta, reason, note) => post(`/admin/store/products/${id}/stock`, { delta, reason, note }),
+    listStockMovements: (id) => get(`/admin/store/products/${id}/movements`),
+    adminListOrders: (status, page) => get(`/admin/store/orders${qs({ status: status?.join(','), page })}`),
+    adminGetOrder: (id) => get(`/admin/store/orders/${id}`),
+    adminSetOrderStatus: (id, data) => patch(`/admin/store/orders/${id}/status`, data),
+    adminSetOrderNotes: (id, adminNotes) => patch(`/admin/store/orders/${id}/notes`, { adminNotes }),
     getCatalog: () => get('/admin/catalog'),
     updatePrices: (prices) => put('/admin/prices', prices),
     updateService: (code, data) => patch(`/admin/services/${code}`, data),

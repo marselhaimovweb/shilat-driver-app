@@ -3,10 +3,11 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { api, type Availability, type BookingType, type Vehicle } from '../../api';
+import { api, ApiError, type Availability, type BookingType, type Vehicle } from '../../api';
 import { Button } from '../../components/Button';
 import { AddVehicleSheet } from '../../components/AddVehicleSheet';
 import { Toggle } from '../../components/Controls';
+import { LegalLink } from '../../components/Legal';
 import { Plate, serviceIcon, vehicleIcon } from '../../components/Domain';
 import { Card, EmptyState, Hero, IconBadge, Row, Screen } from '../../components/Layout';
 import { Text } from '../../components/Text';
@@ -36,6 +37,9 @@ export default function Book() {
   const [loyalty, setLoyalty] = useState<{ punches: number; needed: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [addingVehicle, setAddingVehicle] = useState(false);
+  const [addonCodes, setAddonCodes] = useState<string[]>([]);
+  const [needsAccessibility, setNeedsAccessibility] = useState(false);
+  const addonsOn = !!f?.SERVICE_ADDONS && !!config?.addons.length;
 
   const loadVehicles = useCallback(async () => {
     const [list, l] = await Promise.all([api.listVehicles(), api.getLoyalty()]);
@@ -87,13 +91,13 @@ export default function Book() {
     if (!date || !serviceCode) return setAvailability(null);
     setLoadingSlots(true);
     try {
-      setAvailability(await api.getAvailability(date, serviceCode));
+      setAvailability(await api.getAvailability(date, serviceCode, addonCodes));
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
       setLoadingSlots(false);
     }
-  }, [date, serviceCode, toast]);
+  }, [date, serviceCode, toast, addonCodes]);
 
   useEffect(() => {
     setTime(null);
@@ -102,7 +106,10 @@ export default function Book() {
 
   const vehicle = vehicles?.find((v) => v.id === vehicleId) ?? null;
   const service = config?.services.find((s) => s.code === serviceCode) ?? null;
-  const price = vehicle && serviceCode ? priceOf(vehicle.vehicleTypeCode, serviceCode) : null;
+  const selectedAddons = (config?.addons ?? []).filter((a) => addonCodes.includes(a.code));
+  const addonsTotal = selectedAddons.reduce((sum, a) => sum + a.price, 0);
+  const basePrice = vehicle && serviceCode ? priceOf(vehicle.vehicleTypeCode, serviceCode) : null;
+  const price = basePrice !== null ? basePrice + addonsTotal : null;
   const canRedeem = !!loyalty && loyalty.punches >= loyalty.needed;
   const discount = useLoyalty && canRedeem && vehicle && price ? Math.min(price, priceOf(vehicle.vehicleTypeCode, 'EXTERIOR') ?? 0) : 0;
   const total = price !== null ? price - discount : null;
@@ -113,18 +120,36 @@ export default function Book() {
     if (!ready) return;
     setSubmitting(true);
     try {
-      const res = await api.createBooking({ date: date!, time: time!, serviceCode: serviceCode!, vehicleId: vehicle!.id, useLoyalty: useLoyalty && canRedeem });
+      const res = await api.createBooking({
+        date: date!,
+        time: time!,
+        serviceCode: serviceCode!,
+        vehicleId: vehicle!.id,
+        useLoyalty: useLoyalty && canRedeem,
+        addonCodes: addonsOn ? addonCodes : undefined,
+        needsAccessibility,
+      });
       setTime(null);
       setUseLoyalty(false);
+      setAddonCodes([]);
+      setNeedsAccessibility(false);
       if (res.payment) {
         router.push({
           pathname: '/payment',
-          params: { paymentId: String(res.payment.id), appointmentId: String(res.appointment.id), amount: String(res.payment.amount), hold: String(res.holdMinutes ?? 15), url: res.payment.checkoutUrl ?? '' },
+          params: {
+            paymentId: String(res.payment.id),
+            target: 'APPOINTMENT',
+            targetId: String(res.appointment.id),
+            amount: String(res.payment.amount),
+            hold: String(res.holdMinutes ?? 15),
+            url: res.payment.checkoutUrl ?? '',
+          },
         });
       } else {
         router.push({ pathname: '/booking-success', params: { id: String(res.appointment.id) } });
       }
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'CONSENT_REQUIRED') return router.push('/consent');
       toast((e as Error).message, 'error');
       loadSlots();
     } finally {
@@ -283,10 +308,48 @@ export default function Book() {
                 צברת {loyalty!.punches} שטיפות - שטיפה חיצונית עלינו
               </Text>
             </View>
-            <Toggle value={useLoyalty} onChange={setUseLoyalty} />
+            <Toggle label="מימוש שטיפה מתנה" value={useLoyalty} onChange={setUseLoyalty} />
           </Row>
         )}
       </Step>
+
+      {addonsOn && (
+        <View style={{ gap: 10 }}>
+          <Row gap={8}>
+            <MaterialCommunityIcons name="star-plus-outline" size={20} color={colors.cobalt} />
+            <Text variant="h3">תוספות מומלצות</Text>
+            <Text variant="small" color={colors.textMuted}>
+              (לא חובה)
+            </Text>
+          </Row>
+          <View style={styles.addons}>
+            {config!.addons.map((a) => {
+              const on = addonCodes.includes(a.code);
+              return (
+                <Pressable
+                  key={a.code}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: on }}
+                  accessibilityLabel={`${a.nameHe}, ${a.price} שקלים`}
+                  onPress={() => setAddonCodes((list) => (on ? list.filter((c) => c !== a.code) : [...list, a.code]))}
+                  style={[styles.addon, on && styles.addonOn]}
+                >
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <MaterialCommunityIcons name={on ? 'checkbox-marked-circle' : 'plus-circle-outline'} size={22} color={on ? colors.cobalt : colors.textMuted} />
+                    <Text variant="bodyStrong" color={on ? colors.cobalt : colors.text}>
+                      +{formatPrice(a.price)}
+                    </Text>
+                  </Row>
+                  <Text variant="bodyStrong">{a.nameHe}</Text>
+                  <Text variant="caption" color={colors.textMuted} numberOfLines={2}>
+                    {a.descriptionHe}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       {/* 4. date */}
       {type === 'FUTURE' && (
@@ -351,15 +414,31 @@ export default function Book() {
         )}
       </Step>
 
+      {f?.ACCESSIBILITY_REQUESTS && (
+        <Row style={styles.a11y}>
+          <MaterialCommunityIcons name="wheelchair-accessibility" size={24} color={colors.cobalt} />
+          <View style={{ flex: 1 }}>
+            <Text variant="bodyStrong">אני זקוק/ה לסיוע נגישות</Text>
+            <Text variant="small" color={colors.textSoft}>
+              חניה נגישה, עזרה בהגעה או כל התאמה אחרת - הצוות ייערך מראש
+            </Text>
+          </View>
+          <Toggle label="סיוע נגישות" value={needsAccessibility} onChange={setNeedsAccessibility} />
+        </Row>
+      )}
+
       {type === 'FUTURE' && deposit > 0 && (
         <Row style={styles.policy}>
           <MaterialCommunityIcons name="information-outline" size={20} color={colors.ocean} />
           <Text variant="small" color={colors.navy} style={{ flex: 1 }}>
             המקדמה ({formatPrice(deposit)}) מקוזזת מהמחיר ביום השטיפה. ביטול עד {config?.rules.cancelFreeHours} שעות לפני התור - המקדמה מוחזרת במלואה.
-            אי-הגעה או ביטול מאוחר - המקדמה לא מוחזרת.
+            אי-הגעה או ביטול מאוחר - המקדמה לא מוחזרת. <LegalLink docKey="CANCELLATION">מדיניות מלאה</LegalLink>
           </Text>
         </Row>
       )}
+      <Text variant="small" color={colors.textMuted} align="center">
+        המחירים כוללים מע״מ. בקביעת התור אתם מאשרים את <LegalLink docKey="TERMS">התקנון</LegalLink>, כולל ההנחיות על מצב הרכב וחפצי ערך.
+      </Text>
 
       <AddVehicleSheet
         visible={addingVehicle}
@@ -498,5 +577,9 @@ const styles = StyleSheet.create({
   lastDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning, position: 'relative' },
   notice: { backgroundColor: colors.warningSoft, borderRadius: radius.md, padding: 14 },
   policy: { backgroundColor: colors.foam, borderRadius: radius.md, padding: 14, alignItems: 'flex-start' },
+  addons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  addon: { width: '48%', flexGrow: 1, padding: 12, gap: 4, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.line },
+  addonOn: { borderColor: colors.cobalt, backgroundColor: '#F5F9FF' },
+  a11y: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, borderWidth: 1, borderColor: colors.line },
   depositPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.infoSoft, paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill },
 });

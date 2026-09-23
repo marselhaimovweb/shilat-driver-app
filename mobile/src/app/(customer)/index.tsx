@@ -6,6 +6,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { api, ApiError } from '../../api';
 import { serviceIcon, LoyaltyCard, StatusBadge } from '../../components/Domain';
 import { Card, Hero, IconBadge, Row, Screen, SectionTitle } from '../../components/Layout';
+import { LegalLinks } from '../../components/Legal';
 import { Text } from '../../components/Text';
 import { dayOfWeek, formatRelativeDay, greeting, minutesUntil, today } from '../../lib/dates';
 import { formatPrice } from '../../lib/format';
@@ -168,6 +169,24 @@ export default function Home() {
         </ScrollView>
       </View>
 
+      {f?.STORE && (
+        <Pressable onPress={() => router.push('/store')} style={[styles.storePromo, shadows.md]} accessibilityRole="button" accessibilityLabel="לחנות המוצרים">
+          <LinearGradient colors={['#12B886', '#0B8FB3']} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+          <View style={styles.quickIcon}>
+            <MaterialCommunityIcons name="shopping-outline" size={24} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text variant="h3" color="#fff">
+              חנות הציוד שלנו
+            </Text>
+            <Text variant="small" color={colors.onDarkSoft}>
+              שמפו, ווקס, מיקרופייבר ועוד - איסוף מהעסק או משלוח
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-left" size={26} color="#fff" />
+        </Pressable>
+      )}
+
       <Card style={{ gap: 14 }}>
         <Row>
           <IconBadge icon="map-marker-radius-outline" />
@@ -196,6 +215,7 @@ export default function Home() {
           </Pressable>
         </Row>
       </Card>
+      <LegalLinks />
     </Screen>
   );
 }
@@ -275,6 +295,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#C9EEFA',
   },
+  storePromo: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: radius.xl, overflow: 'hidden', padding: space.lg },
   quick: { flex: 1, borderRadius: radius.xl, overflow: 'hidden', padding: space.lg, gap: space.lg, minHeight: 150 },
   quickIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
   serviceCard: { width: 220, gap: 8, minHeight: 190 },

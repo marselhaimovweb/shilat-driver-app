@@ -1,4 +1,5 @@
 import { query, queryOne } from '../db';
+import { decryptSecret, maskSecret } from './secrets';
 import { dayOfWeek, nowLocal } from './time';
 
 export type FeatureKey =
@@ -11,7 +12,11 @@ export type FeatureKey =
   | 'LOYALTY_PROGRAM'
   | 'REVIEWS'
   | 'SMS_NOTIFICATIONS'
-  | 'ANNOUNCEMENT_BANNER';
+  | 'ANNOUNCEMENT_BANNER'
+  | 'SERVICE_ADDONS'
+  | 'STORE'
+  | 'STORE_DELIVERY'
+  | 'ACCESSIBILITY_REQUESTS';
 
 export async function getFeatures(): Promise<Record<string, boolean>> {
   const rows = await query<{ FlagKey: string; IsEnabled: boolean }>('SELECT FlagKey, IsEnabled FROM dbo.FeatureFlags');
@@ -23,17 +28,6 @@ export async function isEnabled(key: FeatureKey): Promise<boolean> {
   return !!row?.IsEnabled;
 }
 
-export interface NumericSettings {
-  depositAmount: number;
-  slotIntervalMinutes: number;
-  parallelBays: number;
-  futureMaxDays: number;
-  regularMinLeadMinutes: number;
-  cancelFreeHours: number;
-  paymentHoldMinutes: number;
-  loyaltyPunchesForFree: number;
-}
-
 export async function getRawSettings(): Promise<Record<string, string>> {
   const rows = await query<{ SettingKey: string; SettingValue: string | null }>(
     'SELECT SettingKey, SettingValue FROM dbo.Settings',
@@ -41,47 +35,88 @@ export async function getRawSettings(): Promise<Record<string, string>> {
   return Object.fromEntries(rows.map((r) => [r.SettingKey, r.SettingValue ?? '']));
 }
 
-export async function getSettings() {
-  const raw = await getRawSettings();
-  const num = (key: string, fallback: number) => {
-    const n = Number(raw[key]);
-    return Number.isFinite(n) && raw[key] !== '' ? n : fallback;
-  };
-  const numeric: NumericSettings = {
-    depositAmount: num('DEPOSIT_AMOUNT', 20),
-    slotIntervalMinutes: num('SLOT_INTERVAL_MINUTES', 30),
-    parallelBays: num('PARALLEL_BAYS', 2),
-    futureMaxDays: num('FUTURE_MAX_DAYS', 30),
-    regularMinLeadMinutes: num('REGULAR_MIN_LEAD_MINUTES', 15),
-    cancelFreeHours: num('CANCEL_FREE_HOURS', 24),
-    paymentHoldMinutes: num('PAYMENT_HOLD_MINUTES', 15),
-    loyaltyPunchesForFree: num('LOYALTY_PUNCHES_FOR_FREE', 10),
-  };
-  return {
-    ...numeric,
-    businessName: raw.BUSINESS_NAME ?? '',
-    businessPhone: raw.BUSINESS_PHONE ?? '',
-    businessAddress: raw.BUSINESS_ADDRESS ?? '',
-    announcementText: raw.ANNOUNCEMENT_TEXT ?? '',
-  };
-}
+/** Settings the admin can edit, mapped to their database keys. Numbers are parsed. */
+export const NUMERIC_SETTINGS = {
+  depositAmount: ['DEPOSIT_AMOUNT', 20],
+  slotIntervalMinutes: ['SLOT_INTERVAL_MINUTES', 30],
+  parallelBays: ['PARALLEL_BAYS', 4],
+  futureMaxDays: ['FUTURE_MAX_DAYS', 30],
+  regularMinLeadMinutes: ['REGULAR_MIN_LEAD_MINUTES', 15],
+  cancelFreeHours: ['CANCEL_FREE_HOURS', 24],
+  paymentHoldMinutes: ['PAYMENT_HOLD_MINUTES', 15],
+  loyaltyPunchesForFree: ['LOYALTY_PUNCHES_FOR_FREE', 10],
+  vatRate: ['VAT_RATE', 18],
+  storeDeliveryFee: ['STORE_DELIVERY_FEE', 30],
+  storeFreeDeliveryFrom: ['STORE_FREE_DELIVERY_FROM', 250],
+  storePickupHoldDays: ['STORE_PICKUP_HOLD_DAYS', 14],
+} as const;
 
-export type AppSettings = Awaited<ReturnType<typeof getSettings>>;
-
-export const SETTING_KEYS: Record<keyof AppSettings, string> = {
-  depositAmount: 'DEPOSIT_AMOUNT',
-  slotIntervalMinutes: 'SLOT_INTERVAL_MINUTES',
-  parallelBays: 'PARALLEL_BAYS',
-  futureMaxDays: 'FUTURE_MAX_DAYS',
-  regularMinLeadMinutes: 'REGULAR_MIN_LEAD_MINUTES',
-  cancelFreeHours: 'CANCEL_FREE_HOURS',
-  paymentHoldMinutes: 'PAYMENT_HOLD_MINUTES',
-  loyaltyPunchesForFree: 'LOYALTY_PUNCHES_FOR_FREE',
+export const TEXT_SETTINGS = {
   businessName: 'BUSINESS_NAME',
   businessPhone: 'BUSINESS_PHONE',
   businessAddress: 'BUSINESS_ADDRESS',
   announcementText: 'ANNOUNCEMENT_TEXT',
+  businessLegalName: 'BUSINESS_LEGAL_NAME',
+  businessTaxId: 'BUSINESS_TAX_ID',
+  businessEmail: 'BUSINESS_EMAIL',
+  accessibilityCoordinator: 'ACCESSIBILITY_COORDINATOR',
+  accessibilityPhone: 'ACCESSIBILITY_PHONE',
+  accessibilityPhysical: 'ACCESSIBILITY_PHYSICAL',
+  storeDeliveryDays: 'STORE_DELIVERY_DAYS',
+} as const;
+
+type NumericSettings = { -readonly [K in keyof typeof NUMERIC_SETTINGS]: number };
+type TextSettings = { -readonly [K in keyof typeof TEXT_SETTINGS]: string };
+export type AppSettings = NumericSettings & TextSettings;
+
+export const SETTING_KEYS: Record<keyof AppSettings, string> = {
+  ...(Object.fromEntries(Object.entries(NUMERIC_SETTINGS).map(([k, [key]]) => [k, key])) as Record<keyof NumericSettings, string>),
+  ...TEXT_SETTINGS,
 };
+
+export async function getSettings(): Promise<AppSettings> {
+  const raw = await getRawSettings();
+  const out: Record<string, string | number> = {};
+  for (const [field, [key, fallback]] of Object.entries(NUMERIC_SETTINGS)) {
+    const n = Number(raw[key]);
+    out[field] = raw[key] !== undefined && raw[key] !== '' && Number.isFinite(n) ? n : fallback;
+  }
+  for (const [field, key] of Object.entries(TEXT_SETTINGS)) out[field] = raw[key] ?? '';
+  return out as AppSettings;
+}
+
+/* ---------- payment provider configuration (credentials encrypted) ---------- */
+
+export type PaymentProviderName = 'MOCK' | 'CARDCOM' | 'TRANZILA';
+
+export interface PaymentConfig {
+  provider: PaymentProviderName;
+  testMode: boolean;
+  terminal: string;
+  apiUser: string;
+  apiSecret: string;
+  invoiceProvider: string;
+}
+
+export async function getPaymentConfig(): Promise<PaymentConfig> {
+  const raw = await getRawSettings();
+  return {
+    provider: (raw.PAYMENT_PROVIDER || 'MOCK') as PaymentProviderName,
+    testMode: raw.PAYMENT_TEST_MODE !== '0',
+    terminal: raw.PAYMENT_TERMINAL ?? '',
+    apiUser: raw.PAYMENT_API_USER ?? '',
+    apiSecret: decryptSecret(raw.PAYMENT_API_SECRET),
+    invoiceProvider: raw.INVOICE_PROVIDER || 'NONE',
+  };
+}
+
+/** Safe view for the admin panel - the secret is never sent back. */
+export async function getPaymentConfigMasked() {
+  const c = await getPaymentConfig();
+  return { ...c, apiSecret: maskSecret(c.apiSecret), hasSecret: !!c.apiSecret };
+}
+
+/* ---------- hours ---------- */
 
 export interface BusinessHour {
   dayOfWeek: number;

@@ -60,6 +60,15 @@ export default function AppointmentDetails() {
             <InfoLine icon="phone-outline" label="טלפון" value={formatPhone(a.customerPhone)} />
             <InfoLine icon="car-outline" label="רכב" value={a.plateNumber ? <Plate number={a.plateNumber} /> : a.vehicleTypeName} />
             <InfoLine icon="car-info" label="סוג" value={a.vehicleTypeName} />
+            {!!a.addonNames && <InfoLine icon="star-plus-outline" label="תוספות" value={a.addonNames} />}
+            {a.needsAccessibility && (
+              <Row style={{ backgroundColor: colors.infoSoft, borderRadius: 12, padding: 10 }}>
+                <MaterialCommunityIcons name="wheelchair-accessibility" size={20} color={colors.cobalt} />
+                <Text variant="bodyStrong" color={colors.cobalt}>
+                  הלקוח ביקש סיוע נגישות - היערכו מראש
+                </Text>
+              </Row>
+            )}
             {a.customerNotes && <InfoLine icon="message-text-outline" label="הערת לקוח" value={a.customerNotes} />}
             <Row gap={10} style={{ marginTop: 8 }}>
               <Button title="התקשרות" icon="phone" variant="secondary" size="md" style={{ flex: 1 }} onPress={() => Linking.openURL(`tel:${a.customerPhone}`)} />

@@ -42,11 +42,13 @@ export type Params = Record<string, unknown>;
 /** Binds parameters with explicit SQL types so nothing is left to driver guessing. */
 function bind(request: sql.Request, params: Params) {
   for (const [name, value] of Object.entries(params)) {
-    if (value === null || value === undefined) request.input(name, sql.NVarChar, null);
+    // nulls get a wide type: ISNULL(@x, Column) takes the type of @x, and a 1-char default would overflow
+    if (value === null || value === undefined) request.input(name, sql.NVarChar(4000), null);
     else if (typeof value === 'boolean') request.input(name, sql.Bit, value);
     else if (typeof value === 'number')
       request.input(name, Number.isInteger(value) ? sql.Int : sql.Decimal(10, 2), value);
     else if (value instanceof Date) request.input(name, sql.DateTime, value);
+    else if (Buffer.isBuffer(value)) request.input(name, sql.VarBinary(sql.MAX), value);
     else request.input(name, sql.NVarChar(sql.MAX), String(value));
   }
   return request;

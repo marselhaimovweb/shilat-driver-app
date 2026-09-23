@@ -46,6 +46,14 @@
           "supportsRTL": true,
           "forcesRTL": true
         }
+      ],
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "האפליקציה צריכה גישה לתמונות כדי להעלות תמונות מוצרים לחנות (למנהלים בלבד).",
+          "cameraPermission": false
+        }
       ]
     ],
     "extra": {

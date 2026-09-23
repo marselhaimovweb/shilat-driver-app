@@ -73,7 +73,8 @@ export default function BookingSuccess() {
             </View>
             <View style={{ padding: space.lg, gap: 4 }}>
               <InfoLine icon="car-outline" label="רכב" value={<Plate number={a.plateNumber} scale={0.9} />} />
-              <InfoLine icon="cash" label="מחיר" value={formatPrice(a.price - a.discountAmount)} />
+              {!!a.addonNames && <InfoLine icon="star-plus-outline" label="תוספות" value={a.addonNames} />}
+              <InfoLine icon="cash" label="מחיר (כולל מע״מ)" value={formatPrice(a.price - a.discountAmount)} />
               {a.depositAmount > 0 && <InfoLine icon="shield-check-outline" label="מקדמה ששולמה" value={formatPrice(a.depositAmount)} />}
               <InfoLine icon="wallet-outline" label="לתשלום במקום" value={formatPrice(Math.max(0, a.price - a.discountAmount - (a.depositStatus === 'PAID' ? a.depositAmount : 0)))} strong />
               {!!config?.business.address && <InfoLine icon="map-marker-outline" label="כתובת" value={config.business.address} />}

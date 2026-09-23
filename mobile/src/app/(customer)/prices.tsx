@@ -27,7 +27,7 @@ export default function Prices() {
   return (
     <Screen
       header={
-        <Hero eyebrow="שקיפות מלאה" title="המחירון שלנו" subtitle="בלי הפתעות. המחיר שרואים הוא המחיר שמשלמים." compact>
+        <Hero back eyebrow="שקיפות מלאה" title="המחירון שלנו" subtitle="בלי הפתעות. המחירים כוללים מע״מ." compact>
           <Segmented
             tone="dark"
             value={vehicle}
@@ -84,6 +84,21 @@ export default function Prices() {
           </View>
         );
       })}
+
+      {!!config?.addons.length && config.features.SERVICE_ADDONS && (
+        <Card style={{ gap: 10 }}>
+          <Row>
+            <MaterialCommunityIcons name="star-plus-outline" size={22} color={colors.cobalt} />
+            <Text variant="h3">תוספות</Text>
+          </Row>
+          {config.addons.map((a) => (
+            <Row key={a.code} style={{ justifyContent: 'space-between' }}>
+              <Text color={colors.textSoft}>{a.nameHe}</Text>
+              <Text variant="bodyStrong">+{formatPrice(a.price)}</Text>
+            </Row>
+          ))}
+        </Card>
+      )}
 
       {!!config?.rules.depositAmount && (
         <Row style={styles.note}>

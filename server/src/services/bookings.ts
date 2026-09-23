@@ -1,10 +1,11 @@
 import { query, queryOne, sql, transaction } from '../db';
 import { badRequest, conflict, HttpError, notFound } from '../http';
 import { computeSlots, type BusyBlock } from './availability';
-import { getPaymentProvider } from './payments';
+import { assertConsents } from './legal';
+import { activeProvider, refundPayment } from './payments';
 import { getDayInfo, getFeatures, getSettings } from './settings';
 import { sendSms } from './sms';
-import { diffDays, minutesUntil, nowLocal, toMinutes } from './time';
+import { addDays, dayOfWeek, diffDays, minutesUntil, nowLocal, toMinutes } from './time';
 
 export type BookingType = 'REGULAR' | 'FUTURE';
 export type AppointmentStatus = 'PENDING_PAYMENT' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
@@ -22,6 +23,9 @@ export const APPOINTMENT_SELECT = `
   a.AmountPaid AS amountPaid, a.PaymentMethod AS paymentMethod, a.IsFreeLoyalty AS isFreeLoyalty,
   a.CustomerNotes AS customerNotes, a.AdminNotes AS adminNotes, a.CancelReason AS cancelReason,
   a.CancelledBy AS cancelledBy, a.CreatedAt AS createdAt, a.CompletedAt AS completedAt,
+  a.AddonsTotal AS addonsTotal, a.NeedsAccessibility AS needsAccessibility,
+  STUFF((SELECT N', ' + aa.NameHe FROM dbo.AppointmentAddons aa WHERE aa.AppointmentId = a.AppointmentId
+         FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(400)'), 1, 2, '') AS addonNames,
   r.Rating AS rating, r.Comment AS reviewComment`;
 
 export const APPOINTMENT_FROM = `
@@ -44,6 +48,7 @@ export interface AppointmentRow {
   price: number;
   discountAmount: number;
   serviceCode: string;
+  createdAt: Date;
   [key: string]: unknown;
 }
 
@@ -110,7 +115,21 @@ export function bookingTypeForDate(date: string): BookingType | null {
   return diff === 0 ? 'REGULAR' : 'FUTURE';
 }
 
-export async function getAvailability(date: string, serviceCode: string, options: { ignoreLeadTime?: boolean } = {}) {
+export async function addonsDuration(codes: string[]) {
+  if (!codes.length) return 0;
+  const params = Object.fromEntries(codes.slice(0, 10).map((c, i) => [`c${i}`, c]));
+  const row = await queryOne<{ total: number | null }>(
+    `SELECT SUM(DurationMinutes) AS total FROM dbo.ServiceAddons WHERE Code IN (${Object.keys(params).map((k) => `@${k}`).join(', ')})`,
+    params,
+  );
+  return Number(row?.total ?? 0);
+}
+
+export async function getAvailability(
+  date: string,
+  serviceCode: string,
+  options: { ignoreLeadTime?: boolean; extraMinutes?: number } = {},
+) {
   await expirePendingPayments();
   const [day, settings, service] = await Promise.all([getDayInfo(date), getSettings(), getService(serviceCode)]);
   if (!day.isOpen) return { date, isOpen: false as const, reason: day.reason, slots: [] };
@@ -120,7 +139,7 @@ export async function getAvailability(date: string, serviceCode: string, options
     openTime: day.openTime,
     closeTime: day.closeTime,
     intervalMinutes: settings.slotIntervalMinutes,
-    durationMinutes: service.durationMinutes,
+    durationMinutes: service.durationMinutes + (options.extraMinutes ?? 0),
     bays: settings.parallelBays,
     busy: await busyBlocks(date),
     earliestStartMinutes: isToday
@@ -141,8 +160,23 @@ export interface CreateBookingInput {
   source: 'APP' | 'ADMIN' | 'WALKIN' | 'PHONE';
   notes?: string | null;
   useLoyalty?: boolean;
-  /** admin bookings skip the customer-facing feature switches and the deposit */
+  addonCodes?: string[];
+  needsAccessibility?: boolean;
+  /** admin bookings skip the customer-facing feature switches, consent and the deposit */
   byAdmin?: boolean;
+}
+
+async function loadAddons(codes: string[] | undefined, byAdmin: boolean) {
+  if (!codes?.length) return [];
+  const unique = Array.from(new Set(codes)).slice(0, 10);
+  const params = Object.fromEntries(unique.map((c, i) => [`c${i}`, c]));
+  const rows = await query<{ code: string; nameHe: string; price: number; durationMinutes: number; isActive: boolean }>(
+    `SELECT Code AS code, NameHe AS nameHe, Price AS price, DurationMinutes AS durationMinutes, IsActive AS isActive
+     FROM dbo.ServiceAddons WHERE Code IN (${unique.map((_, i) => `@c${i}`).join(', ')})`,
+    params,
+  );
+  if (rows.length !== unique.length || (!byAdmin && rows.some((r) => !r.isActive))) throw badRequest('אחת התוספות אינה זמינה');
+  return rows.map((r) => ({ ...r, price: Number(r.price) }));
 }
 
 export async function createBooking(input: CreateBookingInput) {
@@ -156,6 +190,11 @@ export async function createBooking(input: CreateBookingInput) {
 
   const bookingType = bookingTypeForDate(input.date);
   if (!bookingType) throw badRequest('לא ניתן לקבוע תור לתאריך שעבר');
+  const termsVersion = input.byAdmin ? null : await assertConsents(input.customerId);
+  if (input.addonCodes?.length && !features.SERVICE_ADDONS && !input.byAdmin) throw badRequest('התוספות אינן זמינות כרגע');
+  const addons = await loadAddons(input.addonCodes, !!input.byAdmin);
+  const duration = service.durationMinutes + addons.reduce((sum, a) => sum + a.durationMinutes, 0);
+  const addonsTotal = addons.reduce((sum, a) => sum + a.price, 0);
 
   if (!input.byAdmin) {
     if (!features.BOOKING_SYSTEM) throw new HttpError(503, 'מערכת התורים סגורה כרגע', 'BOOKING_DISABLED');
@@ -169,17 +208,17 @@ export async function createBooking(input: CreateBookingInput) {
   }
   if (!day.isOpen) throw badRequest(day.reason);
   const start = toMinutes(input.time);
-  if (start < toMinutes(day.openTime) || start + service.durationMinutes > toMinutes(day.closeTime))
+  if (start < toMinutes(day.openTime) || start + duration > toMinutes(day.closeTime))
     throw badRequest('השעה מחוץ לשעות הפעילות');
 
-  const customer = await queryOne<{ IsBlocked: boolean; LoyaltyPunches: number; Phone: string }>(
-    'SELECT IsBlocked, LoyaltyPunches, Phone FROM dbo.Customers WHERE CustomerId = @id',
+  const customer = await queryOne<{ IsBlocked: boolean; LoyaltyPunches: number; Phone: string; FullName: string | null }>(
+    'SELECT IsBlocked, LoyaltyPunches, Phone, FullName FROM dbo.Customers WHERE CustomerId = @id',
     { id: input.customerId },
   );
   if (!customer) throw notFound('לקוח לא נמצא');
   if (customer.IsBlocked && !input.byAdmin) throw new HttpError(403, 'לא ניתן לקבוע תור. צרו קשר עם העסק', 'BLOCKED');
 
-  const price = await getPrice(input.vehicleTypeCode, input.serviceCode);
+  const price = (await getPrice(input.vehicleTypeCode, input.serviceCode)) + addonsTotal;
   let discount = 0;
   let isFreeLoyalty = false;
   if (input.useLoyalty) {
@@ -201,7 +240,7 @@ export async function createBooking(input: CreateBookingInput) {
       openTime: day.openTime,
       closeTime: day.closeTime,
       intervalMinutes: 5,
-      durationMinutes: service.durationMinutes,
+      durationMinutes: duration,
       bays: settings.parallelBays,
       busy: await busyBlocks(input.date, tx, true),
       earliestStartMinutes:
@@ -213,10 +252,12 @@ export async function createBooking(input: CreateBookingInput) {
     const row = await queryOne<{ id: number }>(
       `INSERT INTO dbo.Appointments
          (BookingType, Source, CustomerId, VehicleId, PlateNumber, VehicleTypeCode, ServiceCode, ScheduledDate, StartTime,
-          DurationMinutes, Price, DiscountAmount, DepositAmount, DepositStatus, Status, CustomerNotes, IsFreeLoyalty)
+          DurationMinutes, Price, DiscountAmount, DepositAmount, DepositStatus, Status, CustomerNotes, IsFreeLoyalty,
+          AddonsTotal, NeedsAccessibility, TermsVersion)
        VALUES
          (@bookingType, @source, @customerId, @vehicleId, @plateNumber, @vehicleTypeCode, @serviceCode, CAST(@date AS DATE),
-          CAST(@time AS TIME(0)), @duration, @price, @discount, @deposit, @depositStatus, @status, @notes, @isFreeLoyalty);
+          CAST(@time AS TIME(0)), @duration, @price, @discount, @deposit, @depositStatus, @status, @notes, @isFreeLoyalty,
+          @addonsTotal, @needsAccessibility, @termsVersion);
        SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;`,
       {
         bookingType,
@@ -228,7 +269,7 @@ export async function createBooking(input: CreateBookingInput) {
         serviceCode: input.serviceCode,
         date: input.date,
         time: input.time,
-        duration: service.durationMinutes,
+        duration,
         price,
         discount,
         deposit: depositAmount,
@@ -236,15 +277,25 @@ export async function createBooking(input: CreateBookingInput) {
         status,
         notes: input.notes ?? null,
         isFreeLoyalty,
+        addonsTotal,
+        needsAccessibility: !!input.needsAccessibility,
+        termsVersion,
       },
       tx,
     );
     const id = row!.id;
+    for (const a of addons) {
+      await query(
+        'INSERT INTO dbo.AppointmentAddons (AppointmentId, AddonCode, NameHe, Price) VALUES (@id, @code, @name, @price)',
+        { id, code: a.code, name: a.nameHe, price: a.price },
+        tx,
+      );
+    }
     await logStatus(id, null, status, input.byAdmin ? 'ADMIN' : 'CUSTOMER', tx);
 
     let payment: { id: number; amount: number; provider: string; checkoutUrl: string | null } | null = null;
     if (needsDeposit) {
-      const provider = getPaymentProvider();
+      const provider = await activeProvider();
       const paymentRow = await queryOne<{ id: number }>(
         `INSERT INTO dbo.Payments (AppointmentId, Kind, Amount, Provider, Status)
          VALUES (@id, 'DEPOSIT', @amount, @provider, 'PENDING');
@@ -252,10 +303,11 @@ export async function createBooking(input: CreateBookingInput) {
         { id, amount: depositAmount, provider: provider.name },
         tx,
       );
-      const checkout = await provider.createCheckout({
+      const checkout = await provider.impl.createCheckout(provider.cfg, {
         paymentId: paymentRow!.id,
         amount: depositAmount,
         description: `מקדמה לתור #${id}`,
+        customerName: customer.FullName,
         customerPhone: customer.Phone,
       });
       await query('UPDATE dbo.Payments SET ProviderRef = @ref WHERE PaymentId = @pid', { ref: checkout.providerRef, pid: paymentRow!.id }, tx);
@@ -287,7 +339,7 @@ async function notifyConfirmed(appointment: AppointmentRow) {
   ).catch((err) => console.error('sms failed', err));
 }
 
-/** Marks a deposit as paid (called by the payment webhook or the demo confirm endpoint). */
+/** Marks a deposit as paid (called from services/paymentFlow.ts). */
 export async function markDepositPaid(paymentId: number, providerRef?: string) {
   const payment = await queryOne<{ AppointmentId: number; Status: string }>(
     'SELECT AppointmentId, Status FROM dbo.Payments WHERE PaymentId = @paymentId',
@@ -327,7 +379,7 @@ async function refundDeposit(appointmentId: number, amount: number, tx: sql.Tran
     tx,
   );
   if (!paid) return;
-  const ok = await getPaymentProvider().refund(paid.ProviderRef, amount);
+  const ok = await refundPayment(paid.Provider, paid.ProviderRef, amount);
   if (!ok) throw new HttpError(502, 'ההחזר נכשל מול חברת הסליקה');
   await query(
     `INSERT INTO dbo.Payments (AppointmentId, Kind, Amount, Provider, ProviderRef, Status, CompletedAt)
@@ -347,8 +399,24 @@ export async function cancelByCustomer(customerId: number, id: number, reason?: 
   if (minutesLeft <= 0) throw badRequest('מועד התור כבר עבר');
 
   const { cancelFreeHours } = await getSettings();
-  const refund = appointment.depositStatus === 'PAID' && minutesLeft >= cancelFreeHours * 60;
+  const refund =
+    appointment.depositStatus === 'PAID' &&
+    (minutesLeft >= cancelFreeHours * 60 || statutoryRefundDue(appointment.createdAt, appointment.date));
   return cancelAppointment(id, 'CUSTOMER', reason ?? 'בוטל ע״י הלקוח', refund);
+}
+
+/**
+ * Consumer Protection Law, distance service contracts: the customer may cancel
+ * within 14 days of the order if at least 2 days that are not rest days remain
+ * before the service. Saturday counts as the rest day.
+ */
+export function statutoryRefundDue(createdAt: Date | string, serviceDate: string) {
+  const today = nowLocal().date;
+  const booked = nowLocal(new Date(createdAt)).date;
+  if (diffDays(booked, today) > 14) return false;
+  let workingDays = 0;
+  for (let d = addDays(today, 1); d < serviceDate; d = addDays(d, 1)) if (dayOfWeek(d) !== 6) workingDays++;
+  return workingDays >= 2;
 }
 
 export async function cancelAppointment(id: number, by: 'CUSTOMER' | 'ADMIN', reason: string, refund: boolean) {
@@ -457,4 +525,35 @@ export async function adminSetStatus(
     await logStatus(id, appointment.status, status, opts.adminName, tx);
   });
   return { appointment: await getAppointment(id), refunded: false };
+}
+
+/**
+ * SMS reminder for confirmed appointments starting in the next 2-24 hours
+ * (only once per appointment, only when SMS notifications are switched on).
+ */
+export async function sendReminders() {
+  const features = await getFeatures();
+  if (!features.SMS_NOTIFICATIONS) return;
+  const now = nowLocal();
+  const tomorrow = addDays(now.date, 1);
+  const due = await query<{ id: number; phone: string; date: string; time: string; serviceName: string }>(
+    `SELECT a.AppointmentId AS id, c.Phone AS phone, CONVERT(CHAR(10), a.ScheduledDate, 120) AS date,
+            CONVERT(CHAR(5), a.StartTime, 108) AS time, st.NameHe AS serviceName
+     FROM dbo.Appointments a
+     JOIN dbo.Customers c ON c.CustomerId = a.CustomerId
+     JOIN dbo.ServiceTypes st ON st.Code = a.ServiceCode
+     WHERE a.Status = 'CONFIRMED' AND a.ReminderSentAt IS NULL AND c.DeletedAt IS NULL
+       AND a.ScheduledDate IN (CAST(@today AS DATE), CAST(@tomorrow AS DATE))`,
+    { today: now.date, tomorrow },
+  );
+  const { businessName, businessAddress } = await getSettings();
+  for (const a of due) {
+    const left = minutesUntil(a.date, a.time);
+    if (left < 120 || left > 24 * 60) continue;
+    await sendSms(
+      a.phone,
+      `${businessName}: תזכורת - ${a.serviceName} ${a.date === now.date ? 'היום' : 'מחר'} בשעה ${a.time}, ${businessAddress}. לביטול: באפליקציה.`,
+    ).catch((err) => console.error('reminder failed', err));
+    await query('UPDATE dbo.Appointments SET ReminderSentAt = GETDATE() WHERE AppointmentId = @id', { id: a.id });
+  }
 }

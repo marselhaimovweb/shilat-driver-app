@@ -126,13 +126,44 @@ export default function Dashboard() {
             <StatTile label="אי-הגעה (30 יום)" value={`${noShowRate}%`} icon="account-alert-outline" hint={`${d.periods.noShow30} מתוך ${d.periods.closed30}`} />
             <StatTile label="דירוג ממוצע" value={d.reviews.avgRating ? Number(d.reviews.avgRating).toFixed(1) : '—'} icon="star-outline" hint={`${d.reviews.reviewCount} דירוגים`} />
           </Row>
-          <Row gap={space.sm} style={{ marginTop: -space.sm }}>
+          {d.store && (
+            <Pressable onPress={() => router.push('/admin/store')} accessibilityRole="button" accessibilityLabel="חנות ומלאי">
+              <Card style={{ gap: 10 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Row gap={8}>
+                    <MaterialCommunityIcons name="store-outline" size={22} color={colors.cobalt} />
+                    <Text variant="h3">חנות</Text>
+                  </Row>
+                  <MaterialCommunityIcons name="chevron-left" size={22} color={colors.textMuted} />
+                </Row>
+                <Row gap={space.sm}>
+                  <MiniStat label="הזמנות לטיפול" value={String(d.store.ordersToHandle)} warn={d.store.ordersToHandle > 0} />
+                  <MiniStat label="מלאי נמוך" value={String(d.store.lowStock)} warn={d.store.lowStock > 0} />
+                  <MiniStat label="מכירות החודש" value={formatPrice(d.store.storeRevenueMonth)} />
+                </Row>
+              </Card>
+            </Pressable>
+          )}
+          <Row gap={space.sm}>
             <StatTile label="שטיפות החודש" value={d.periods.washesMonth} icon="car-wash" />
             <StatTile label="לקוחות חדשים" value={d.periods.newCustomersMonth} icon="account-plus-outline" hint="החודש" />
           </Row>
         </>
       ) : null}
     </Screen>
+  );
+}
+
+function MiniStat({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: warn ? colors.warningSoft : colors.mist, borderRadius: radius.md, padding: 10 }}>
+      <Text variant="caption" color={warn ? colors.warning : colors.textMuted}>
+        {label}
+      </Text>
+      <Text variant="h3" color={warn ? colors.warning : colors.text} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+    </View>
   );
 }
 

@@ -36,7 +36,8 @@ export const config = {
 
   smsProvider: env('SMS_PROVIDER', 'console'),
   otpDevMode: bool(env('OTP_DEV_MODE', 'false')),
-  paymentProvider: env('PAYMENT_PROVIDER', 'mock'),
+  /** public https address of this API - used for payment webhooks and return pages */
+  publicUrl: env('PUBLIC_URL', 'http://localhost:4000').replace(/\/$/, ''),
 };
 
 if (config.isProduction && config.jwtSecret === 'dev-only-secret') {

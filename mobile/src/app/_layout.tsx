@@ -11,6 +11,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { I18nManager, Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AccessibilityProvider } from '../state/accessibility';
+import { CartProvider } from '../state/cart';
 import { ConfigProvider } from '../state/config';
 import { FeedbackProvider } from '../state/feedback';
 import { SessionProvider, useSession } from '../state/session';
@@ -47,6 +49,8 @@ function Navigator() {
       <Stack.Screen name="admin-login" />
       <Stack.Screen name="payment" options={{ presentation: 'modal' }} />
       <Stack.Screen name="booking-success" options={{ animation: 'fade', gestureEnabled: false }} />
+      <Stack.Screen name="order-success" options={{ animation: 'fade', gestureEnabled: false }} />
+      <Stack.Screen name="consent" options={{ gestureEnabled: false }} />
       <Stack.Screen name="admin" />
     </Stack>
   );
@@ -55,14 +59,18 @@ function Navigator() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <SessionProvider>
-        <ConfigProvider>
-          <FeedbackProvider>
-            <StatusBar style="light" />
-            <Navigator />
-          </FeedbackProvider>
-        </ConfigProvider>
-      </SessionProvider>
+      <AccessibilityProvider>
+        <SessionProvider>
+          <ConfigProvider>
+            <CartProvider>
+              <FeedbackProvider>
+                <StatusBar style="light" />
+                <Navigator />
+              </FeedbackProvider>
+            </CartProvider>
+          </ConfigProvider>
+        </SessionProvider>
+      </AccessibilityProvider>
     </SafeAreaProvider>
   );
 }

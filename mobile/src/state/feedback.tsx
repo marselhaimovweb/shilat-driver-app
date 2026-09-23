@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Animated, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, haptic } from '../components/Button';
 import { Text } from '../components/Text';
@@ -45,6 +45,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     if (!toastState) return;
     anim.setValue(0);
     Animated.spring(anim, { toValue: 1, useNativeDriver: Platform.OS !== 'web', friction: 8 }).start();
+    AccessibilityInfo.announceForAccessibility?.(toastState.message);
     const t = setTimeout(() => {
       Animated.timing(anim, { toValue: 0, duration: 220, useNativeDriver: Platform.OS !== 'web' }).start(() => setToastState(null));
     }, 2600);
@@ -99,6 +100,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       {toastState && (
         <Animated.View
           pointerEvents="none"
+          accessibilityLiveRegion="polite"
           style={[
             styles.toast,
             shadows.lg,

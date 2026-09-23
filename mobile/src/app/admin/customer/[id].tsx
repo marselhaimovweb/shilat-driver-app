@@ -90,6 +90,21 @@ export default function CustomerDetails() {
             </Card>
           )}
 
+          <Card style={{ gap: 6 }}>
+            <Text variant="h3">הסכמות</Text>
+            <Text variant="small" color={colors.textSoft}>
+              תקנון ופרטיות: {c.termsAcceptedAt ? `אושרו ב-${new Date(c.termsAcceptedAt).toLocaleString('he-IL')}` : 'טרם אושרו'}
+            </Text>
+            <Text variant="small" color={colors.textSoft}>
+              דיוור שיווקי: {c.marketingOptIn ? 'מאושר' : 'לא מאושר - אין לשלוח הודעות פרסומיות'}
+            </Text>
+            {c.role && c.role !== 'CUSTOMER' && (
+              <Text variant="small" color={colors.cobalt}>
+                הרשאת ניהול: {c.role === 'OWNER' ? 'בעלים' : c.role === 'MANAGER' ? 'מנהל/ת' : 'צוות'}
+              </Text>
+            )}
+          </Card>
+
           <Card style={{ gap: 14 }}>
             <Row style={{ justifyContent: 'space-between' }}>
               <View style={{ flex: 1 }}>

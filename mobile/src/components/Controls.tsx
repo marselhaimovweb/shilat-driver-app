@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
 import { colors, fonts, gradients, radius, shadows } from '../theme';
+import { useA11y } from '../state/accessibility';
 import { haptic, type IconName } from './Button';
 import { Text } from './Text';
 
@@ -24,6 +25,8 @@ export function Chip({
   const dark = tone === 'dark';
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!selected }}
       onPress={() => {
         haptic();
         onPress?.();
@@ -72,6 +75,8 @@ export function Segmented<T extends string>({
         return (
           <Pressable
             key={o.value}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
             onPress={() => {
               haptic();
               onChange(o.value);
@@ -91,16 +96,19 @@ export function Segmented<T extends string>({
 
 /* ---------- On/off switch ---------- */
 
-export function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Toggle({ value, onChange, disabled, label }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
+  const { reduceMotion } = useA11y();
   useEffect(() => {
-    Animated.spring(anim, { toValue: value ? 1 : 0, useNativeDriver: false, friction: 7, tension: 90 }).start();
-  }, [value, anim]);
+    if (reduceMotion) anim.setValue(value ? 1 : 0);
+    else Animated.spring(anim, { toValue: value ? 1 : 0, useNativeDriver: false, friction: 7, tension: 90 }).start();
+  }, [value, anim, reduceMotion]);
   // RTL: the knob rests on the start side (right) and slides left when on
   const translate = anim.interpolate({ inputRange: [0, 1], outputRange: [0, -22] });
   return (
     <Pressable
       accessibilityRole="switch"
+      accessibilityLabel={label}
       accessibilityState={{ checked: value, disabled }}
       disabled={disabled}
       onPress={() => {
@@ -144,6 +152,7 @@ export function Field({
       >
         {icon && <MaterialCommunityIcons name={icon} size={20} color={focused ? colors.cobalt : colors.textMuted} />}
         <TextInput
+          accessibilityLabel={label ?? input.placeholder}
           placeholderTextColor={colors.textMuted}
           {...input}
           onFocus={(e) => {
@@ -172,7 +181,7 @@ export function Stars({ value, onChange, size = 22 }: { value: number; onChange?
   return (
     <View style={{ flexDirection: 'row', gap: 4 }}>
       {[1, 2, 3, 4, 5].map((n) => (
-        <Pressable key={n} disabled={!onChange} onPress={() => onChange?.(n)} hitSlop={4}>
+        <Pressable key={n} disabled={!onChange} onPress={() => onChange?.(n)} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${n} כוכבים`}>
           <MaterialCommunityIcons name={n <= value ? 'star' : 'star-outline'} size={size} color={n <= value ? colors.gold : colors.lineStrong} />
         </Pressable>
       ))}
@@ -185,14 +194,14 @@ export function Stars({ value, onChange, size = 22 }: { value: number; onChange?
 export function Stepper({ value, onChange, step = 1, min = 0, max = 9999, suffix }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string }) {
   return (
     <View style={styles.stepper}>
-      <Pressable style={styles.stepBtn} onPress={() => onChange(Math.min(max, value + step))} hitSlop={6}>
+      <Pressable style={styles.stepBtn} onPress={() => onChange(Math.min(max, value + step))} hitSlop={6} accessibilityRole="button" accessibilityLabel="הגדלה">
         <MaterialCommunityIcons name="plus" size={18} color={colors.navy} />
       </Pressable>
       <Text variant="bodyStrong" style={{ minWidth: 56 }} align="center">
         {value}
         {suffix ? ` ${suffix}` : ''}
       </Text>
-      <Pressable style={styles.stepBtn} onPress={() => onChange(Math.max(min, value - step))} hitSlop={6}>
+      <Pressable style={styles.stepBtn} onPress={() => onChange(Math.max(min, value - step))} hitSlop={6} accessibilityRole="button" accessibilityLabel="הקטנה">
         <MaterialCommunityIcons name="minus" size={18} color={colors.navy} />
       </Pressable>
     </View>
@@ -215,7 +224,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     minHeight: 54,
   },
-  input: { flex: 1, fontFamily: fonts.regular, fontSize: 16, color: colors.text, paddingVertical: 12, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {}) },
+  // minWidth 0: lets narrow fields shrink below the browser's intrinsic input width
+  input: { flex: 1, minWidth: 0, fontFamily: fonts.regular, fontSize: 16, color: colors.text, paddingVertical: 12, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {}) },
   stepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.mist, borderRadius: radius.pill, padding: 4, gap: 4 },
   stepBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
 });
+
+/* ---------- Checkbox (consents) ---------- */
+
+export function Checkbox({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      onPress={() => {
+        haptic();
+        onChange(!checked);
+      }}
+      style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}
+      hitSlop={6}
+    >
+      <MaterialCommunityIcons name={checked ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} color={checked ? colors.cobalt : colors.textMuted} />
+      <View style={{ flex: 1 }}>{children}</View>
+    </Pressable>
+  );
+}
