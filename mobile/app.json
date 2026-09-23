@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "אקווה שיין",
+    "slug": "aqua-shine-carwash",
+    "scheme": "aquashine",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#04121F",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aquashine.carwash"
+    },
+    "android": {
+      "package": "com.aquashine.carwash",
+      "adaptiveIcon": {
+        "backgroundColor": "#071E33",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#04121F"
+        }
+      ],
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-localization",
+        {
+          "supportsRTL": true,
+          "forcesRTL": true
+        }
+      ]
+    ],
+    "extra": {
+      "supportsRTL": true,
+      "forcesRTL": true
+    }
+  }
+}
