@@ -1,5 +1,7 @@
 import cors from 'cors';
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import helmet from 'helmet';
 import { config } from './config';
 import { getPool } from './db';
@@ -27,6 +29,16 @@ app.use('/api/auth', authRouter);
 app.use('/api/me', customerRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/payments', paymentsRouter);
+
+// optional: serve the exported web app (customer site + admin panel) from the same port
+const webDir = process.env.WEB_DIR ? path.resolve(process.env.WEB_DIR) : '';
+if (webDir && fs.existsSync(path.join(webDir, 'index.html'))) {
+  app.use(helmet.contentSecurityPolicy({ useDefaults: true, directives: { 'img-src': ["'self'", 'data:', 'blob:', 'https:'], 'script-src': ["'self'", "'unsafe-inline'"] } }));
+  app.use(express.static(webDir, { index: 'index.html', maxAge: '1h' }));
+  app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDir, 'index.html')));
+  console.log(`Serving web app from ${webDir}`);
+}
+
 app.use((_req, _res, next) => next(notFound('נתיב לא קיים')));
 app.use(errorHandler);
 
@@ -39,7 +51,7 @@ async function main() {
     expirePendingOrders().catch((err) => console.error('order expire job failed', err));
   }, 60_000);
   setInterval(() => sendReminders().catch((err) => console.error('reminder job failed', err)), 5 * 60_000);
-  app.listen(config.port, () => console.log(`Car wash API listening on :${config.port}`));
+  app.listen(config.port, '0.0.0.0', () => console.log(`Car wash API listening on :${config.port}`));
 }
 
 main().catch((err) => {
